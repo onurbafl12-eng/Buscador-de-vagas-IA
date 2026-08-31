@@ -2,15 +2,17 @@ name: Executador Diario de Vagas
 
 on:
   schedule:
-    - cron: '0 11,21 * * *' # Roda automaticamente 2x ao dia (08h e 18h no horário de Brasília)
-  workflow_dispatch: # Permite rodar manualmente com 1 clique
+    - cron: '0 11,21 * * *'
+  workflow_dispatch:
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          fetch-depth: 0
+
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
@@ -30,11 +32,13 @@ jobs:
 
       - name: Salvar Historico de Vagas
         run: |
-        
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull origin main --rebase
           git add processed_jobs.json
-          git commit -m "chore: atualiza vagas processadas [skip ci]" || exit 0
-          git push
-          
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: atualiza vagas processadas [skip ci]"
+            git pull origin main --rebase || true
+            git push origin main
+          else
+            echo "Nenhuma alteracao no historico de vagas."
+          fi
