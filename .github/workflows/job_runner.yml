@@ -30,8 +30,11 @@ jobs:
 
       - name: Salvar Historico de Vagas
         run: |
+        
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase
           git add processed_jobs.json
           git commit -m "chore: atualiza vagas processadas [skip ci]" || exit 0
           git push
+          
