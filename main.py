@@ -12,9 +12,20 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 PROCESSED_JOBS_FILE = "processed_jobs.json"
 
-# Perfil Desejado e Exclusões para a IA
-PROFILE_TARGET = "Analista de Dados, Engenheiro de Dados ou Especialista em Automação Python"
+# Perfil Desejado expandido e Filtros para a IA
+PROFILE_TARGET = "Analista Jr, Analista de Processos, Analista de Processos e Projetos, Analista Comercial, Analista Pleno, Analista PL, Analista de Dados"
 NEGATIVE_KEYWORDS = "Estágio, Vaga Presencial com mais de 50km, Java, PHP, C++"
+
+# Lista de termos para realizar a busca nas plataformas
+SEARCH_TERMS = [
+    "Analista Jr",
+    "Analista de Processos",
+    "Analista de Processos e Projetos",
+    "Analista Comercial",
+    "Analista Pleno",
+    "Analista PL",
+    "Analista de Dados"
+]
 
 def load_processed_jobs():
     if os.path.exists(PROCESSED_JOBS_FILE):
@@ -31,7 +42,7 @@ def save_processed_jobs(processed_ids):
 
 # --- SCRAPERS PARA PLATAFORMAS REAIS ---
 
-def fetch_linkedin_jobs(term="Analista de Dados"):
+def fetch_linkedin_jobs(term):
     url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={term}&location=Brasil"
     headers = {"User-Agent": "Mozilla/5.0"}
     jobs = []
@@ -53,11 +64,12 @@ def fetch_linkedin_jobs(term="Analista de Dados"):
                     "source": "LinkedIn"
                 })
     except Exception as e:
-        print(f"Erro LinkedIn: {e}")
+        print(f"Erro LinkedIn para '{term}': {e}")
     return jobs
 
-def fetch_vagas_com_jobs(term="Analista de Dados"):
-    url = f"https://www.vagas.com.br/vagas-de-{term.replace(' ', '-')}"
+def fetch_vagas_com_jobs(term):
+    formatted_term = term.replace(" ", "-").lower()
+    url = f"https://www.vagas.com.br/vagas-de-{formatted_term}"
     headers = {"User-Agent": "Mozilla/5.0"}
     jobs = []
     try:
@@ -78,7 +90,29 @@ def fetch_vagas_com_jobs(term="Analista de Dados"):
                     "source": "Vagas.com"
                 })
     except Exception as e:
-        print(f"Erro Vagas.com: {e}")
+        print(f"Erro Vagas.com para '{term}': {e}")
+    return jobs
+
+def fetch_gupy_jobs(term):
+    url = f"https://portal.api.gupy.io/api/v1/jobs?jobName={term}&limit=10&offset=0"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    jobs = []
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            for item in data.get("data", []):
+                job_id = f"gupy-{item.get('id')}"
+                jobs.append({
+                    "id": job_id,
+                    "title": item.get("name", "Sem título"),
+                    "company": item.get("careerPageName", "Empresa na Gupy"),
+                    "link": item.get("jobUrl", ""),
+                    "description": f"Vaga de {item.get('name')} na plataforma Gupy. Tipo: {item.get('type', '')}",
+                    "source": "Gupy"
+                })
+    except Exception as e:
+        print(f"Erro Gupy para '{term}': {e}")
     return jobs
 
 # --- FILTRAGEM VIA IA ---
@@ -127,8 +161,16 @@ def send_telegram(job, reason):
 
 def main():
     processed = load_processed_jobs()
-    all_jobs = fetch_linkedin_jobs() + fetch_vagas_com_jobs()
-    print(f"Total de vagas coletadas: {len(all_jobs)}")
+    all_jobs = []
+
+    # Faz a busca para cada termo configurado
+    for term in SEARCH_TERMS:
+        print(f"Buscando vagas para: {term}")
+        all_jobs.extend(fetch_linkedin_jobs(term))
+        all_jobs.extend(fetch_vagas_com_jobs(term))
+        all_jobs.extend(fetch_gupy_jobs(term))
+
+    print(f"Total de vagas coletadas no total: {len(all_jobs)}")
 
     for job in all_jobs:
         if job["id"] in processed:
