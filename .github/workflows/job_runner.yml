@@ -1,0 +1,37 @@
+name: Executador Diario de Vagas
+
+on:
+  schedule:
+    - cron: '0 11,21 * * *' # Roda automaticamente 2x ao dia (08h e 18h no horário de Brasília)
+  workflow_dispatch: # Permite rodar manualmente com 1 clique
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar Dependencias
+        run: |
+          pip install -r requirements.txt
+
+      - name: Executar Scraper
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Salvar Historico de Vagas
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add processed_jobs.json
+          git commit -m "chore: atualiza vagas processadas [skip ci]" || exit 0
+          git push
