@@ -167,6 +167,18 @@ def send_telegram(job, reason):
         pass
 
 def main():
+    # --- TESTE FORÇADO DO TELEGRAM ---
+    vaga_teste = {
+        "id": "teste-001",
+        "title": "Analista de Processos (Teste)",
+        "company": "Empresa Teste",
+        "link": "https://google.com",
+        "source": "Teste Manual"
+    }
+    print("Enviando vaga de teste para o Telegram...")
+    send_telegram(vaga_teste, "Teste de validação das variáveis")
+    # ----------------------------------
+
     processed = load_processed_jobs()
     all_jobs = []
 
