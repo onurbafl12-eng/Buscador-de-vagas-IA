@@ -1,126 +1,75 @@
 import os
 import json
 import requests
+import urllib.parse
 from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 
-# Configurações de Ambiente
+# Configurations
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-
 PROCESSED_JOBS_FILE = "processed_jobs.json"
 
-# Configuração de Filtro por Região e Perfil
-TARGET_LOCATION = "Fortaleza, Ceará, Brasil"  # Altere a região aqui se desejar
-PROFILE_TARGET = "Analista (Jr, Pleno, Processos, Projetos, Comercial ou Dados)"
-NEGATIVE_KEYWORDS = "Estágio, Presencial fora de Fortaleza/CE, Java, PHP, C++"
+TARGET_LOCATION = "Fortaleza, Ceará, Brasil"
+PROFILE_TARGET = "Analista (Jr, Pleno, Processos, Dados, Projetos, Operacional)"
+NEGATIVE_KEYWORDS = "Estágio, Desenvolvedor Senior"
 
-# Agrupamos os termos em buscas mais genéricas para economizar requisições HTTP
-SEARCH_TERMS = [
-    "Analista",
-    "Analista de Processos",
-    "Analista de Dados"
-]
+SEARCH_TERMS = ["Analista", "Analista de Processos", "Analista de Dados"]
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept-Language": "pt-BR,pt;q=0.9"
-}
+# --- NOVAS FONTES: INDEED & CATHO ---
 
-def load_processed_jobs():
-    if os.path.exists(PROCESSED_JOBS_FILE):
-        try:
-            with open(PROCESSED_JOBS_FILE, "r") as f:
-                content = f.read().strip()
-                return set(json.loads(content)) if content else set()
-        except Exception:
-            return set()
-    return set()
-
-def save_processed_jobs(processed_ids):
-    try:
-        with open(PROCESSED_JOBS_FILE, "w") as f:
-            json.dump(list(processed_ids), f, indent=2)
-    except Exception as e:
-        print(f"Erro ao salvar histórico: {e}")
-
-# --- SCRAPERS OTIMIZADOS COM FILTRO REGIONAL E TIMEOUT CURTO (5s) ---
-
-def fetch_linkedin_jobs(term):
-    # geoId=102061033 ou location ajustada para focar na sua região/remoto
-    url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={term}&location=Fortaleza%2C%20Cear%C3%A1%2C%20Brasil"
+def fetch_indeed_jobs(term):
     jobs = []
     try:
-        res = requests.get(url, headers=HEADERS, timeout=5)
-        soup = BeautifulSoup(res.text, "html.parser")
-        for card in soup.find_all("li"):
-            title_elem = card.find("h3", class_="base-search-card__title")
-            company_elem = card.find("h4", class_="base-search-card__subtitle")
-            link_elem = card.find("a", class_="base-card__full-link")
-            if title_elem and link_elem:
-                href = link_elem["href"].split("?")[0]
-                job_id = "linkedin-" + href.split("-")[-1]
+        encoded_term = urllib.parse.quote(term)
+        encoded_location = urllib.parse.quote(TARGET_LOCATION)
+        url = f"https://br.indeed.com/rss?q={encoded_term}&l={encoded_location}"
+        
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, "xml")
+            items = soup.find_all("item")
+            for item in items:
+                title = item.find("title").text if item.find("title") else "Sem título"
+                link = item.find("link").text if item.find("link") else ""
+                desc = item.find("description").text if item.find("description") else ""
+                
                 jobs.append({
-                    "id": job_id,
-                    "title": title_elem.text.strip(),
-                    "company": company_elem.text.strip() if company_elem else "Não informado",
-                    "link": href,
-                    "description": f"Vaga de {title_elem.text.strip()} em {TARGET_LOCATION} ou Remoto",
-                    "source": "LinkedIn"
+                    "id": f"indeed_{link}",
+                    "title": title,
+                    "company": "Indeed",
+                    "link": link,
+                    "description": desc,
+                    "source": "Indeed"
                 })
     except Exception as e:
-        print(f"Aviso LinkedIn ({term}): {e}")
+        print(f"Aviso Indeed ({term}): {e}")
     return jobs
 
-def fetch_vagas_com_jobs(term):
-    formatted_term = term.replace(" ", "-").lower()
-    url = f"https://www.vagas.com.br/vagas-de-{formatted_term}-em-fortaleza"
+def fetch_catho_jobs(term):
     jobs = []
     try:
-        res = requests.get(url, headers=HEADERS, timeout=5)
-        soup = BeautifulSoup(res.text, "html.parser")
-        for card in soup.find_all("li", class_="vaga"):
-            title_elem = card.find("a", class_="link-detalhes-vaga")
-            company_elem = card.find("span", class_="empr")
-            if title_elem:
-                href = "https://www.vagas.com.br" + title_elem["href"]
-                job_id = "vagascom-" + title_elem["href"].split("/")[-2]
+        url = f"https://www.catho.com.br/vagas/api/v1/vagas?q={urllib.parse.quote(term)}&cidade={urllib.parse.quote(TARGET_LOCATION)}&limit=10"
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            for v in data.get("vagas", []):
                 jobs.append({
-                    "id": job_id,
-                    "title": title_elem.text.strip(),
-                    "company": company_elem.text.strip() if company_elem else "Não informado",
-                    "link": href,
-                    "description": f"Vaga de {title_elem.text.strip()} no Vagas.com (Região {TARGET_LOCATION})",
-                    "source": "Vagas.com"
+                    "id": f"catho_{v.get('id')}",
+                    "title": v.get("titulo", ""),
+                    "company": v.get("contratante", {}).get("nome", "Confidencial"),
+                    "link": f"https://www.catho.com.br/vagas/vaga/{v.get('id')}",
+                    "description": v.get("descricao", ""),
+                    "source": "Catho"
                 })
     except Exception as e:
-        print(f"Aviso Vagas.com ({term}): {e}")
+        print(f"Aviso Catho ({term}): {e}")
     return jobs
 
-def fetch_gupy_jobs(term):
-    url = f"https://portal.api.gupy.io/api/v1/jobs?jobName={term}&limit=10&offset=0"
-    jobs = []
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            for item in data.get("data", []):
-                job_id = f"gupy-{item.get('id')}"
-                jobs.append({
-                    "id": job_id,
-                    "title": item.get("name", "Sem título"),
-                    "company": item.get("careerPageName", "Empresa na Gupy"),
-                    "link": item.get("jobUrl", ""),
-                    "description": f"Vaga na Gupy: {item.get('name')}.",
-                    "source": "Gupy"
-                })
-    except Exception as e:
-        print(f"Aviso Gupy ({term}): {e}")
-    return jobs
-
-# --- FILTRAGEM COM IA REFORÇADA ---
+# --- FILTRAGEM COM IA ---
 
 def is_job_relevant_with_ai(job_title, job_description):
     if not GEMINI_API_KEY:
@@ -151,7 +100,7 @@ def is_job_relevant_with_ai(job_title, job_description):
     except Exception as e:
         return False, f"Descartado por erro/timeout na IA: {e}"
 
-# --- EXECUÇÃO PRINCIPAL ---
+# --- NOTIFICAÇÃO & EXECUÇÃO ---
 
 def send_telegram(job, reason):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -174,6 +123,8 @@ def main():
         all_jobs.extend(fetch_linkedin_jobs(term))
         all_jobs.extend(fetch_vagas_com_jobs(term))
         all_jobs.extend(fetch_gupy_jobs(term))
+        all_jobs.extend(fetch_indeed_jobs(term))
+        all_jobs.extend(fetch_catho_jobs(term))
 
     print(f"Total de vagas encontradas: {len(all_jobs)}")
 
@@ -185,11 +136,13 @@ def main():
         if relevant:
             print(f"[APROVADA] {job['title']} - {job['source']}")
             send_telegram(job, reason)
+        else:
+            print(f"[REJEITADA] {job['title']} - Motivo: {reason}")
 
         processed.add(job["id"])
 
     save_processed_jobs(processed)
-    print("Execução rápida concluída com sucesso!")
+    print("Execução concluída com sucesso!")
 
 if __name__ == "__main__":
     main()
