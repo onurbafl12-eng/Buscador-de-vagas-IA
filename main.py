@@ -12,22 +12,21 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 PROCESSED_JOBS_FILE = "processed_jobs.json"
 
-PROFILE_TARGET = "Analista Jr, Analista de Processos, Analista de Processos e Projetos, Analista Comercial, Analista Pleno, Analista PL, Analista de Dados"
-NEGATIVE_KEYWORDS = "Estágio, Vaga Presencial com mais de 50km, Java, PHP, C++"
+# Configuração de Filtro por Região e Perfil
+TARGET_LOCATION = "Fortaleza, Ceará, Brasil"  # Altere a região aqui se desejar
+PROFILE_TARGET = "Analista (Jr, Pleno, Processos, Projetos, Comercial ou Dados)"
+NEGATIVE_KEYWORDS = "Estágio, Presencial fora de Fortaleza/CE, Java, PHP, C++"
 
+# Agrupamos os termos em buscas mais genéricas para economizar requisições HTTP
 SEARCH_TERMS = [
-    "Analista Jr",
+    "Analista",
     "Analista de Processos",
-    "Analista de Processos e Projetos",
-    "Analista Comercial",
-    "Analista Pleno",
-    "Analista PL",
     "Analista de Dados"
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept-Language": "pt-BR,pt;q=0.9"
 }
 
 def load_processed_jobs():
@@ -35,11 +34,8 @@ def load_processed_jobs():
         try:
             with open(PROCESSED_JOBS_FILE, "r") as f:
                 content = f.read().strip()
-                if not content:
-                    return set()
-                return set(json.loads(content))
-        except Exception as e:
-            print(f"Aviso ao carregar JSON: {e}")
+                return set(json.loads(content)) if content else set()
+        except Exception:
             return set()
     return set()
 
@@ -48,15 +44,16 @@ def save_processed_jobs(processed_ids):
         with open(PROCESSED_JOBS_FILE, "w") as f:
             json.dump(list(processed_ids), f, indent=2)
     except Exception as e:
-        print(f"Erro ao salvar historico: {e}")
+        print(f"Erro ao salvar histórico: {e}")
 
-# --- SCRAPERS ---
+# --- SCRAPERS OTIMIZADOS COM FILTRO REGIONAL E TIMEOUT CURTO (5s) ---
 
 def fetch_linkedin_jobs(term):
-    url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={term}&location=Brasil"
+    # geoId=102061033 ou location ajustada para focar na sua região/remoto
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={term}&location=Fortaleza%2C%20Cear%C3%A1%2C%20Brasil"
     jobs = []
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
+        res = requests.get(url, headers=HEADERS, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
         for card in soup.find_all("li"):
             title_elem = card.find("h3", class_="base-search-card__title")
@@ -70,19 +67,19 @@ def fetch_linkedin_jobs(term):
                     "title": title_elem.text.strip(),
                     "company": company_elem.text.strip() if company_elem else "Não informado",
                     "link": href,
-                    "description": f"Vaga de {title_elem.text.strip()} no LinkedIn",
+                    "description": f"Vaga de {title_elem.text.strip()} em {TARGET_LOCATION} ou Remoto",
                     "source": "LinkedIn"
                 })
     except Exception as e:
-        print(f"Erro LinkedIn ({term}): {e}")
+        print(f"Aviso LinkedIn ({term}): {e}")
     return jobs
 
 def fetch_vagas_com_jobs(term):
     formatted_term = term.replace(" ", "-").lower()
-    url = f"https://www.vagas.com.br/vagas-de-{formatted_term}"
+    url = f"https://www.vagas.com.br/vagas-de-{formatted_term}-em-fortaleza"
     jobs = []
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
+        res = requests.get(url, headers=HEADERS, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
         for card in soup.find_all("li", class_="vaga"):
             title_elem = card.find("a", class_="link-detalhes-vaga")
@@ -95,18 +92,18 @@ def fetch_vagas_com_jobs(term):
                     "title": title_elem.text.strip(),
                     "company": company_elem.text.strip() if company_elem else "Não informado",
                     "link": href,
-                    "description": f"Vaga de {title_elem.text.strip()} no Vagas.com",
+                    "description": f"Vaga de {title_elem.text.strip()} no Vagas.com (Região {TARGET_LOCATION})",
                     "source": "Vagas.com"
                 })
     except Exception as e:
-        print(f"Erro Vagas.com ({term}): {e}")
+        print(f"Aviso Vagas.com ({term}): {e}")
     return jobs
 
 def fetch_gupy_jobs(term):
     url = f"https://portal.api.gupy.io/api/v1/jobs?jobName={term}&limit=10&offset=0"
     jobs = []
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
+        res = requests.get(url, headers=HEADERS, timeout=5)
         if res.status_code == 200:
             data = res.json()
             for item in data.get("data", []):
@@ -116,31 +113,32 @@ def fetch_gupy_jobs(term):
                     "title": item.get("name", "Sem título"),
                     "company": item.get("careerPageName", "Empresa na Gupy"),
                     "link": item.get("jobUrl", ""),
-                    "description": f"Vaga de {item.get('name')} na plataforma Gupy.",
+                    "description": f"Vaga na Gupy: {item.get('name')}.",
                     "source": "Gupy"
                 })
     except Exception as e:
-        print(f"Erro Gupy ({term}): {e}")
+        print(f"Aviso Gupy ({term}): {e}")
     return jobs
 
-# --- FILTRAGEM VIA IA ---
+# --- FILTRAGEM COM IA REFORÇADA ---
 
 def is_job_relevant_with_ai(job_title, job_description):
     if not GEMINI_API_KEY:
-        return True, "Sem API Key configurada"
+        return True, "Sem API Key"
 
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         prompt = f"""
-        Avalie se a seguinte vaga é RELEVANTE para o perfil desejado.
+        Avalie se a vaga é RELEVANTE para o perfil.
         Perfil Desejado: {PROFILE_TARGET}
+        Região Preferencial: {TARGET_LOCATION} ou Remoto
         Filtro Negativo: {NEGATIVE_KEYWORDS}
 
         Vaga: {job_title}
         Descrição: {job_description}
 
-        Responda APENAS em formato JSON estrito:
-        {{"relevant": true, "reason": "motivo curto"}}
+        Responda APENAS em JSON estrito:
+        {{"relevant": true, "reason": "motivo curto em ate 6 palavras"}}
         """
         response = client.models.generate_content(
             model='gemini-2.5-flash',
@@ -151,41 +149,34 @@ def is_job_relevant_with_ai(job_title, job_description):
         data = json.loads(text_resp)
         return data.get("relevant", False), data.get("reason", "Aprovado")
     except Exception as e:
-        print(f"Erro ao processar IA para '{job_title}': {e}")
-        return True, "Aprovado por falha na verificação da IA"
+        return False, f"Descartado por erro/timeout na IA: {e}"
 
-# --- NOTIFICAÇÃO TELEGRAM ---
+# --- EXECUÇÃO PRINCIPAL ---
 
 def send_telegram(job, reason):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print(f"[Aprovada - Telegram nao configurado] {job['title']} ({job['source']})")
         return
-
     msg = f"🎯 <b>Nova Vaga ({job['source']})!</b>\n\n📌 <b>Cargo:</b> {job['title']}\n🏢 <b>Empresa:</b> {job['company']}\n💡 <b>IA:</b> {reason}\n\n🔗 <a href='{job['link']}'>Ver Vaga</a>"
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"},
-            timeout=10
+            timeout=5
         )
-    except Exception as e:
-        print(f"Erro envio Telegram: {e}")
-
-# --- EXECUÇÃO PRINCIPAL ---
+    except Exception:
+        pass
 
 def main():
     processed = load_processed_jobs()
     all_jobs = []
 
     for term in SEARCH_TERMS:
-        print(f"Buscando vagas para: {term}")
         all_jobs.extend(fetch_linkedin_jobs(term))
         all_jobs.extend(fetch_vagas_com_jobs(term))
         all_jobs.extend(fetch_gupy_jobs(term))
 
     print(f"Total de vagas encontradas: {len(all_jobs)}")
 
-    new_jobs_found = 0
     for job in all_jobs:
         if job["id"] in processed:
             continue
@@ -194,14 +185,11 @@ def main():
         if relevant:
             print(f"[APROVADA] {job['title']} - {job['source']}")
             send_telegram(job, reason)
-        else:
-            print(f"[REJEITADA] {job['title']} - Motivo: {reason}")
 
         processed.add(job["id"])
-        new_jobs_found += 1
 
     save_processed_jobs(processed)
-    print(f"Execução concluída. {new_jobs_found} novas vagas processadas.")
+    print("Execução rápida concluída com sucesso!")
 
 if __name__ == "__main__":
     main()
