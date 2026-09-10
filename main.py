@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-import urllib.parse
+from serpapi import GoogleSearch
 from google import genai
 from google.genai import types
 
@@ -37,7 +37,7 @@ def save_processed_jobs(processed_jobs):
     except Exception as e:
         print(f"Erro ao salvar histórico: {e}")
 
-# --- BUSCA UNIFICADA DE VAGAS VIA SERPAPI (GOOGLE JOBS) ---
+# --- BUSCA UNIFICADA VIA SERPAPI (OFICIAL) ---
 
 def fetch_google_jobs(term):
     jobs = []
@@ -48,42 +48,39 @@ def fetch_google_jobs(term):
     try:
         params = {
             "engine": "google_jobs",
-            "q": f"{term} em {TARGET_LOCATION}",
+            "q": f"{term} em Fortaleza CE",
             "hl": "pt-br",
             "gl": "br",
             "api_key": SERPAPI_KEY
         }
-        response = requests.get("https://serpapi.com/search", params=params, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            results = data.get("jobs_results", [])
-            for item in results:
-                job_id = item.get("job_id") or item.get("docid") or item.get("link", "")
-                title = item.get("title", "Sem título")
-                company = item.get("company_name", "Confidencial")
-                description = item.get("description", f"Vaga para {title}")
-                
-                # Obtém o link direto para candidatura ou portal da vaga
-                link = ""
-                apply_options = item.get("apply_options", [])
-                if apply_options:
-                    link = apply_options[0].get("link", "")
-                if not link:
-                    link = item.get("share_link", "")
+        
+        search = GoogleSearch(params)
+        results_dict = search.get_dict()
+        results = results_dict.get("jobs_results", [])
 
-                # Identifica a fonte (LinkedIn, Catho, Indeed, Vagas.com, etc)
-                via = item.get("via", "Google Jobs").replace("via ", "")
+        for item in results:
+            job_id = item.get("job_id") or item.get("docid") or item.get("title", "")
+            title = item.get("title", "Sem título")
+            company = item.get("company_name", "Confidencial")
+            description = item.get("description", f"Vaga para {title}")
+            
+            link = ""
+            apply_options = item.get("apply_options", [])
+            if apply_options:
+                link = apply_options[0].get("link", "")
+            if not link:
+                link = item.get("share_link", "")
 
-                jobs.append({
-                    "id": f"serp_{job_id}",
-                    "title": title,
-                    "company": company,
-                    "link": link,
-                    "description": description[:1000],  # Limita tamanho para a IA
-                    "source": via
-                })
-        else:
-            print(f"Erro SerpApi ({term}): Status {response.status_code}")
+            via = item.get("via", "Google Jobs").replace("via ", "")
+
+            jobs.append({
+                "id": f"serp_{job_id}",
+                "title": title,
+                "company": company,
+                "link": link,
+                "description": description[:1000],
+                "source": via
+            })
     except Exception as e:
         print(f"Erro ao buscar via SerpApi ({term}): {e}")
     
@@ -120,7 +117,7 @@ def is_job_relevant_with_ai(job_title, job_description):
         text_resp = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(text_resp)
         return bool(data.get("relevant", False)), str(data.get("reason", "Aprovado"))
-    except Exception as e:
+    except Exception:
         return True, "Aprovado via Fallback"
 
 # --- NOTIFICAÇÃO TELEGRAM ---
